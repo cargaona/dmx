@@ -3,16 +3,16 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dmx"
-version = "1.0.0"
-description = "Simple music search and download tool using deemix"
+name = "dmx-music"
+version = "0.1.0"
+description = "Interactive music search and download tool with Deezer integration - browse artists, albums, and download music"
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [
     {name = "cargaona", email = "cargaona@users.noreply.github.com"}
 ]
 license = {text = "MIT"}
-keywords = ["music", "download", "deezer", "deemix", "audio"]
+keywords = ["music", "download", "deezer", "deemix", "audio", "interactive", "cli", "artist", "album", "search"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",
@@ -25,6 +25,9 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: System :: Archiving",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
 ]
 
 dependencies = [
@@ -61,6 +64,7 @@ test = [
 
 [project.scripts]
 dmx = "dmx.__main__:main"
+dmx-music = "dmx.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

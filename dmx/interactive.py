@@ -45,6 +45,8 @@ class InteractiveSession:
         
         self.current_results: List[Dict[str, Any]] = []
         self.current_mode = "tracks"  # tracks, albums, artists
+        self.current_artist_albums: List[Dict[str, Any]] = []  # For artist profile view
+        self.current_artist_info: Dict[str, Any] = {}  # Current artist info
         self.search_history: List[str] = []
         try:
             self.validator = InputValidator()
@@ -109,12 +111,13 @@ class InteractiveSession:
             print(f"{Fore.YELLOW}⚠️  Warning: No ARL configured. Downloads will not work.{Style.RESET_ALL}")
         
         print(f"\n{Fore.BLUE}Commands:{Style.RESET_ALL}")
-        print("  [number]     - Download item by number")
+        print("  [number]     - Download item (tracks/albums) or view profile (artists)")
         print("  s <query>    - Search for tracks")
         print("  sa <query>   - Search for albums") 
         print("  st <query>   - Search for artists")
         print("  m [mode]     - Switch mode (tracks/albums/artists)")
         print("  l            - List current results")
+        print("  back/b       - Go back from artist profile to search results")
         print("  status       - Show system status")
         print("  h            - Show this help")
         print("  q            - Quit")
@@ -126,7 +129,12 @@ class InteractiveSession:
             try:
                 # Show current mode in prompt
                 mode_color = self._get_mode_color()
-                prompt = f"{mode_color}[{self.current_mode}]{Style.RESET_ALL} > "
+                if self.current_artist_albums:
+                    # In artist profile view
+                    artist_name = self.current_artist_info.get('name', 'Artist')
+                    prompt = f"{mode_color}[{artist_name} Albums]{Style.RESET_ALL} > "
+                else:
+                    prompt = f"{mode_color}[{self.current_mode}]{Style.RESET_ALL} > "
                 
                 user_input = input(prompt).strip()
                 
@@ -148,9 +156,17 @@ class InteractiveSession:
     async def _handle_command(self, user_input: str) -> bool:
         """Handle user command. Returns False to exit."""
         try:
-            # Check if it's a number (download command)
+            # Check if it's a number 
             if user_input.isdigit():
-                return self._download_by_number(int(user_input))
+                if self.current_mode == "artists" and not self.current_artist_albums:
+                    # View artist profile (not in artist profile view yet)
+                    return await self._view_artist_profile(int(user_input))
+                elif self.current_artist_albums:
+                    # Download album from artist profile view
+                    return self._download_album_from_artist(int(user_input))
+                else:
+                    # Download item
+                    return self._download_by_number(int(user_input))
             
             # Parse command and arguments
             parts = user_input.split(maxsplit=1)
@@ -172,6 +188,8 @@ class InteractiveSession:
                     print(f"{Fore.RED}Usage: s <query>{Style.RESET_ALL}")
                 else:
                     self.current_mode = "tracks"
+                    self.current_artist_albums = []  # Clear artist profile
+                    self.current_artist_info = {}
                     await self._search(args)
             
             elif cmd == 'sa':
@@ -179,6 +197,8 @@ class InteractiveSession:
                     print(f"{Fore.RED}Usage: sa <query>{Style.RESET_ALL}")
                 else:
                     self.current_mode = "albums"
+                    self.current_artist_albums = []  # Clear artist profile
+                    self.current_artist_info = {}
                     await self._search(args)
             
             elif cmd == 'st':
@@ -186,11 +206,15 @@ class InteractiveSession:
                     print(f"{Fore.RED}Usage: st <query>{Style.RESET_ALL}")
                 else:
                     self.current_mode = "artists"
+                    self.current_artist_albums = []  # Clear artist profile
+                    self.current_artist_info = {}
                     await self._search(args)
             
             elif cmd == 'm' or cmd == 'mode':
                 if args in ['tracks', 'albums', 'artists']:
                     self.current_mode = args
+                    self.current_artist_albums = []  # Clear artist profile
+                    self.current_artist_info = {}
                     print(f"{Fore.GREEN}Switched to {args} mode{Style.RESET_ALL}")
                 elif not args:
                     print(f"{Fore.BLUE}Current mode: {self.current_mode}{Style.RESET_ALL}")
@@ -199,10 +223,25 @@ class InteractiveSession:
                     print(f"{Fore.RED}Invalid mode: {args}{Style.RESET_ALL}")
             
             elif cmd == 'l' or cmd == 'list':
-                self._display_results()
+                if self.current_artist_albums:
+                    self._display_artist_albums()
+                else:
+                    self._display_results()
+            
+            elif cmd == 'back' or cmd == 'b':
+                if self.current_artist_albums:
+                    # Exit artist profile view
+                    self.current_artist_albums = []
+                    self.current_artist_info = {}
+                    print(f"{Fore.GREEN}Back to artist search results{Style.RESET_ALL}")
+                    self._display_results()
+                else:
+                    print(f"{Fore.YELLOW}Nothing to go back to{Style.RESET_ALL}")
             
             else:
                 # Treat as search query for current mode
+                self.current_artist_albums = []  # Clear artist profile
+                self.current_artist_info = {}
                 await self._search(user_input)
             
             return True
@@ -377,6 +416,139 @@ class InteractiveSession:
             context = ErrorContext(
                 "download", 
                 additional_info={'number': number, 'item': item if 'item' in locals() else None}
+            )
+            self.error_handler.handle_error(e, context)
+        
+        return True
+    
+    async def _view_artist_profile(self, number: int) -> bool:
+        """View artist profile with top songs and albums."""
+        try:
+            if not self.current_results:
+                print(f"{Fore.RED}No search results available.{Style.RESET_ALL}")
+                return True
+            
+            # Validate number
+            if number < 1 or number > len(self.current_results):
+                print(f"{Fore.RED}Invalid number. Choose 1-{len(self.current_results)}{Style.RESET_ALL}")
+                return True
+            
+            artist = self.current_results[number - 1]
+            
+            if artist['type'] != 'artist':
+                print(f"{Fore.RED}Selected item is not an artist.{Style.RESET_ALL}")
+                return True
+            
+            artist_id = artist['id']
+            print(f"{Fore.BLUE}Loading artist profile for {artist['name']}...{Style.RESET_ALL}")
+            
+            # Get artist profile
+            profile = self.client.get_artist_profile(str(artist_id))
+            
+            if not profile:
+                print(f"{Fore.RED}Could not load artist profile.{Style.RESET_ALL}")
+                return True
+            
+            # Store artist info and albums for download functionality
+            self.current_artist_info = profile.get('artist', {})
+            self.current_artist_albums = profile.get('albums', [])
+            
+            self._display_artist_profile(profile)
+            
+        except Exception as e:
+            context = ErrorContext(
+                "artist_profile", 
+                additional_info={'number': number, 'artist': artist if 'artist' in locals() else None}
+            )
+            self.error_handler.handle_error(e, context)
+        
+        return True
+    
+    def _display_artist_profile(self, profile: Dict[str, Any]):
+        """Display artist profile with top songs and all albums."""
+        artist_info = profile.get('artist', {})
+        top_tracks = profile.get('top_tracks', [])
+        albums = profile.get('albums', [])
+        
+        # Artist header
+        print(f"\n{Fore.CYAN}🎤 Artist Profile{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{artist_info.get('name', 'Unknown')}{Style.RESET_ALL}")
+        print(f"     {Fore.YELLOW}{artist_info.get('albums', 0)} albums{Style.RESET_ALL} • {Fore.CYAN}{artist_info.get('fans', 0):,} fans{Style.RESET_ALL}")
+        
+        # Top tracks (display only, not downloadable from here)
+        if top_tracks:
+            print(f"\n{Fore.BLUE}🎵 Top Songs:{Style.RESET_ALL}")
+            for i, track in enumerate(top_tracks[:5], 1):  # Show top 5
+                print(f"     {Fore.GREEN}{track['title']}{Style.RESET_ALL}")
+                print(f"     {Fore.BLUE}{track['album']}{Style.RESET_ALL} • {Fore.YELLOW}{track['duration']}{Style.RESET_ALL}")
+        
+        # All albums (downloadable)
+        if albums:
+            print(f"\n{Fore.BLUE}💿 Albums (Enter number to download):{Style.RESET_ALL}")
+            self._display_artist_albums()
+        
+        print(f"\n{Fore.CYAN}Commands: [number] = download album | 'back' = return to artist search | 'l' = list albums{Style.RESET_ALL}")
+        print()
+    
+    def _display_artist_albums(self):
+        """Display all albums from current artist with download numbers."""
+        if not self.current_artist_albums:
+            print(f"{Fore.YELLOW}No albums to display.{Style.RESET_ALL}")
+            return
+        
+        for i, album in enumerate(self.current_artist_albums, 1):
+            # Number with padding  
+            num_str = f"{Fore.WHITE}{Back.BLUE} {i:2d} {Style.RESET_ALL}"
+            print(f"{num_str} {Fore.GREEN}{album['title']}{Style.RESET_ALL}")
+            print(f"     {Fore.YELLOW}{album['tracks']} tracks{Style.RESET_ALL}")
+        print()
+    
+    def _download_album_from_artist(self, number: int) -> bool:
+        """Download album by number from artist profile view."""
+        try:
+            if not self.current_artist_albums:
+                print(f"{Fore.RED}No albums available for download.{Style.RESET_ALL}")
+                return True
+            
+            # Validate number
+            if number < 1 or number > len(self.current_artist_albums):
+                print(f"{Fore.RED}Invalid number. Choose 1-{len(self.current_artist_albums)}{Style.RESET_ALL}")
+                return True
+            
+            album = self.current_artist_albums[number - 1]
+            album_title = album.get('title', 'Unknown')
+            album_url = album.get('url', '')
+            
+            # Validate URL if validator is available
+            if self.validator:
+                try:
+                    validated_url = self.validator.validate_url(album_url)
+                except Exception:
+                    validated_url = album_url
+            else:
+                validated_url = album_url
+            
+            print(f"{Fore.BLUE}Downloading album: {album_title} ({album.get('tracks', 0)} tracks){Style.RESET_ALL}")
+            
+            # Check safety if available
+            try:
+                from dmx.error_handler import SafetyChecker
+                from pathlib import Path
+                if not SafetyChecker.check_disk_space(Path(self.config.output_dir)):
+                    print(f"{Fore.YELLOW}Warning: Low disk space{Style.RESET_ALL}")
+            except Exception:
+                pass
+            
+            success = self.client.download(validated_url)
+            if success:
+                print(f"{Fore.GREEN}✓ Album download completed successfully{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}✗ Album download failed{Style.RESET_ALL}")
+        
+        except Exception as e:
+            context = ErrorContext(
+                "album_download",
+                additional_info={'number': number, 'album': album if 'album' in locals() else None}
             )
             self.error_handler.handle_error(e, context)
         

@@ -154,6 +154,21 @@ class MusicClient:
         logger.warning("No search clients available")
         return []
     
+    def get_artist_profile(self, artist_id: str) -> Dict[str, Any]:
+        """Get artist profile with top songs and albums."""
+        # Only deemix client supports artist profiles
+        if self.deemix_client and self.client_status['deemix_client']:
+            try:
+                profile = self.deemix_client.get_artist_profile(artist_id)
+                if profile:
+                    logger.debug(f"Retrieved artist profile for ID {artist_id}")
+                    return profile
+            except Exception as e:
+                logger.warning(f"Failed to get artist profile: {e}")
+        
+        logger.warning("No artist profile client available")
+        return {}
+    
     def download(self, url: str) -> bool:
         """Download with real deemix client only."""
         # Only use deemix client for downloads

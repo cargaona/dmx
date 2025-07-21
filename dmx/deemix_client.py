@@ -123,8 +123,37 @@ class DeemixClient:
             return []
         
         try:
-            results = self.dz.api.search(query, "artist", limit=limit)
-            return self._format_artists(results.get('data', []))
+            # Search for tracks and extract unique artists
+            # Note: Deezer API search with type "artist" returns tracks, not artist objects
+            track_results = self.dz.api.search(query, "track", limit=limit*2)
+            track_data = track_results.get('data', [])
+            
+            # Extract unique artists and get their full details
+            artist_ids = set()
+            artists_data = []
+            
+            for track in track_data:
+                artist_info = track.get('artist', {})
+                artist_id = artist_info.get('id')
+                
+                if artist_id and artist_id not in artist_ids:
+                    artist_ids.add(artist_id)
+                    try:
+                        # Get full artist details from API
+                        full_artist = self.dz.api.get_artist(artist_id)
+                        artists_data.append(full_artist)
+                    except:
+                        # Fallback to basic artist info from track
+                        artists_data.append(artist_info)
+                    
+                    # Limit results
+                    if len(artists_data) >= limit:
+                        break
+            
+            formatted_artists = self._format_artists(artists_data)
+            # Sort by fan count (highest to lowest)
+            formatted_artists.sort(key=lambda x: x.get('fans', 0), reverse=True)
+            return formatted_artists
         except Exception as e:
             print(f"Search error: {e}")
             return []
@@ -171,6 +200,19 @@ class DeemixClient:
         
         return list(albums.values())
     
+    def _extract_artists_from_tracks(self, tracks: List[Dict]) -> List[Dict[str, Any]]:
+        """Extract unique artists from track search results."""
+        artists = {}
+        
+        for track in tracks:
+            artist_info = track.get('artist', {})
+            artist_id = artist_info.get('id')
+            
+            if artist_id and artist_id not in artists:
+                artists[artist_id] = artist_info
+        
+        return list(artists.values())
+    
     def _format_artists(self, artists: List[Dict]) -> List[Dict[str, Any]]:
         """Format artist search results for display."""
         formatted = []
@@ -192,6 +234,59 @@ class DeemixClient:
         minutes = seconds // 60
         seconds = seconds % 60
         return f"{minutes}:{seconds:02d}"
+    
+    def get_artist_profile(self, artist_id: str) -> Dict[str, Any]:
+        """Get artist profile with top songs and albums."""
+        if not self.dz:
+            return {}
+        
+        try:
+            # Get artist info
+            artist_info = self.dz.api.get_artist(artist_id)
+            
+            # Get top tracks
+            try:
+                top_tracks_response = self.dz.api.get_artist_top(artist_id, limit=10)
+                top_tracks = self._format_tracks(top_tracks_response.get('data', []))
+            except:
+                top_tracks = []
+            
+            # Get albums
+            try:
+                albums_response = self.dz.api.get_artist_albums(artist_id, limit=500)  # Get all albums
+                albums = []
+                for album in albums_response.get('data', []):
+                    album_id = album.get('id')
+                    try:
+                        # Get full album details to get track count
+                        full_album = self.dz.api.get_album(album_id)
+                        track_count = full_album.get('nb_tracks', 0)
+                    except:
+                        track_count = 0
+                    
+                    albums.append({
+                        'id': album_id,
+                        'title': album.get('title', 'Unknown'),
+                        'tracks': track_count,
+                        'type': 'album',
+                        'url': f"https://www.deezer.com/album/{album_id}"
+                    })
+            except:
+                albums = []
+            
+            return {
+                'artist': {
+                    'id': artist_info.get('id'),
+                    'name': artist_info.get('name', 'Unknown'),
+                    'albums': artist_info.get('nb_album', 0),
+                    'fans': artist_info.get('nb_fan', 0)
+                },
+                'top_tracks': top_tracks,
+                'albums': albums
+            }
+        except Exception as e:
+            print(f"Error fetching artist profile: {e}")
+            return {}
     
     # Download Methods
     def download(self, url: str) -> bool:
