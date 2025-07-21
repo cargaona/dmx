@@ -1,18 +1,36 @@
-# dmx
+# dmx - Interactive Music Search & Download
 
-Simple music search and download tool using deemix.
+Interactive music search and download tool with Deezer integration. Browse artists, view their profiles, and download albums directly from the command line.
 
-## Features
+## ✨ Features
 
-- **Interactive Search**: Search for tracks, albums, and artists on Deezer
-- **Quality Downloads**: Automatic quality fallback (320kbps → 128kbps)
+### 🎵 **Advanced Artist Browsing**
+- **Artist Search & Profiles**: Search artists and view detailed profiles with top songs
+- **Complete Album Collections**: Browse ALL albums from any artist (sorted by popularity)  
+- **Direct Album Downloads**: Download any album by simply typing its number
+- **Smart Sorting**: Artists sorted by fan count for better discovery
+
+### 🎯 **Interactive Experience**
+- **Multi-Mode Search**: Switch between tracks, albums, and artists instantly
+- **Intuitive Navigation**: Browse artist profiles with `back` command support
+- **Visual Feedback**: Color-coded interface with progress indicators
 - **Smart Detection**: Avoids re-downloading existing files
-- **Clean Interface**: Minimal, colorful command-line interface
+
+### ⚡ **Quality & Performance**
+- **Quality Downloads**: Automatic quality fallback (320kbps → 128kbps → available)
+- **Batch Operations**: Efficient album downloads with progress tracking
 - **ARL Authentication**: Secure authentication using Deezer ARL tokens
+- **Cross-Platform**: Works on Windows, macOS, and Linux
 
-## Installation
+## 📦 Installation
 
-### Using Nix (Recommended)
+### Using pip (Recommended)
+
+```bash
+pip install dmx-music
+```
+
+### Using Nix
 
 ```bash
 # Install directly from GitHub
@@ -22,12 +40,6 @@ nix run github:cargaona/dmx
 {
   inputs.dmx.url = "github:cargaona/dmx";
 }
-```
-
-### Using pip
-
-```bash
-pip install dmx
 ```
 
 ### From source
@@ -59,6 +71,49 @@ pip install -e .
    [tracks] > lady gaga disease
    [tracks] > 1  # Download first result
    ```
+
+## 🎨 Artist Browsing Workflow
+
+**Featured in v0.1.0**: Complete artist profile browsing with album downloads
+
+```bash
+# Switch to artists mode
+[tracks] > m artists
+
+# Search for artists (sorted by fan count)
+[artists] > pez
+
+# View artist profile
+[artists] > 2  # Select Pez with 10,580 fans
+
+# Browse ALL artist albums (72 total)
+[Pez Albums] > l  # List all albums
+
+# Download any album directly  
+[Pez Albums] > 15  # Download album #15
+
+# Navigate back
+[Pez Albums] > back
+[artists] > 
+```
+
+### Example Artist Profile:
+```
+🎤 Artist Profile
+Pez
+     72 albums • 10,580 fans
+
+🎵 Top Songs:
+     Aire al Fin
+     El Manto Eléctrico • 3:13
+
+💿 Albums (Enter number to download):
+  1  Goodbye Dear, Ok Chicago. (11 tracks)
+  2  Ion (13 tracks)
+  [... 70 more albums ...]
+
+Commands: [number] = download album | 'back' = return to artist search
+```
 
 ## Usage
 
