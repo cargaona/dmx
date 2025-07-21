@@ -22,12 +22,7 @@
           pname = "dmx";
           version = "1.0.4";
 
-          src = pkgs.fetchFromGitHub {
-            owner = "cargaona";
-            repo = "dmx";
-            rev = "master";
-            sha256 = "sha256-KLx+r/KfWsvLd4wSO4WtBasvCy84XkA2enCQ8vkfl04=";
-          };
+          src = ./.; 
 
           buildInputs = [ python pkgs.makeWrapper ];
           
@@ -39,7 +34,7 @@
             makeWrapper ${python}/bin/python $out/bin/dmx \
               --add-flags "-m dmx" \
               --set PYTHONPATH "$out/lib/python:${python.pkgs.makePythonPath (with python.pkgs; [
-                click requests colorama aiohttp
+                click requests colorama aiohttp deemix
               ])}"
           '';
 
@@ -63,6 +58,11 @@
             python.pkgs.pip
             python.pkgs.setuptools
             python.pkgs.wheel
+            python.pkgs.deemix
+            python.pkgs.click
+            python.pkgs.colorama
+            python.pkgs.requests
+            python.pkgs.aiohttp
           ];
 
           shellHook = ''
