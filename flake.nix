@@ -1,5 +1,5 @@
 {
-  description = "dmx - Simple music search and download tool using deemix";
+  description = "Simple music search and download tool using deemix.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -9,69 +9,40 @@
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = import nixpkgs {
+          inherit system;
+        };
         
-        dmx = pkgs.python3Packages.buildPythonApplication {
+        python = pkgs.python311;
+        
+        
+      in
+      {
+        packages.default = pkgs.stdenv.mkDerivation {
           pname = "dmx";
-          version = "1.0.0";
-          format = "pyproject";
+          version = "1.0.4";
+
+          src = pkgs.fetchFromGitHub {
+            owner = "cargaona";
+            repo = "dmx";
+            rev = "master";
+            sha256 = "sha256-KLx+r/KfWsvLd4wSO4WtBasvCy84XkA2enCQ8vkfl04=";
+          };
+
+          buildInputs = [ python pkgs.makeWrapper ];
           
-          src = ./.;
-          
-          nativeBuildInputs = with pkgs.python3Packages; [
-            setuptools
-            wheel
-          ];
-          
-          propagatedBuildInputs = with pkgs.python3Packages; [
-            # Core dependencies
-            click
-            colorama
-            requests
-            aiohttp
+          installPhase = ''
+            mkdir -p $out/bin $out/lib/python/dmx
+            cp -r dmx/* $out/lib/python/dmx/
+            cp -r *.py $out/lib/python/ 2>/dev/null || true
             
-            # Try to use deemix if available, otherwise install from PyPI
-            (pkgs.python3Packages.callPackage ./nix/deemix.nix {} or
-             pkgs.python3Packages.buildPythonPackage rec {
-               pname = "deemix";
-               version = "3.6.6";
-               
-               src = pkgs.python3Packages.fetchPypi {
-                 inherit pname version;
-                 sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # Will be updated
-               };
-               
-               propagatedBuildInputs = with pkgs.python3Packages; [
-                 pycryptodomex
-                 mutagen
-                 deezer-py
-               ];
-               
-               # Skip tests as they require network access
-               doCheck = false;
-               
-               meta = with pkgs.lib; {
-                 description = "A barebone deezer downloader library";
-                 homepage = "https://deemix.app";
-                 license = licenses.gpl3Plus;
-               };
-             })
-          ];
-          
-          # Skip tests that require network access or special setup
-          doCheck = false;
-          
-          # Install shell completions if available
-          postInstall = ''
-            # Generate shell completions
-            mkdir -p $out/share/bash-completion/completions
-            mkdir -p $out/share/zsh/site-functions
-            mkdir -p $out/share/fish/vendor_completions.d
-            
-            # Try to generate completions (may fail if click version doesn't support it)
-            $out/bin/dmx --help > /dev/null || true
+            makeWrapper ${python}/bin/python $out/bin/dmx \
+              --add-flags "-m dmx" \
+              --set PYTHONPATH "$out/lib/python:${python.pkgs.makePythonPath (with python.pkgs; [
+                click requests colorama aiohttp
+              ])}"
           '';
-          
+
           meta = with pkgs.lib; {
             description = "Simple music search and download tool using deemix";
             homepage = "https://github.com/cargaona/dmx";
@@ -80,47 +51,24 @@
             platforms = platforms.unix;
           };
         };
-      in
-      {
-        packages = {
-          default = dmx;
-          dmx = dmx;
+
+        apps.default = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/dmx";
         };
-        
-        # Development shell
+
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            python3
-            python3Packages.pip
-            python3Packages.setuptools
-            python3Packages.wheel
-            
-            # Development tools
-            python3Packages.pytest
-            python3Packages.pytest-asyncio
-            python3Packages.pytest-cov
-            python3Packages.black
-            python3Packages.flake8
-            python3Packages.mypy
+            python
+            python.pkgs.pip
+            python.pkgs.setuptools
+            python.pkgs.wheel
           ];
-          
+
           shellHook = ''
             echo "dmx development environment"
-            echo "Run 'python -m pip install -e .' to install in development mode"
-            echo "Run 'dmx --help' to see available commands"
+            python --version
           '';
-        };
-        
-        # Apps for easy running
-        apps = {
-          default = {
-            type = "app";
-            program = "${dmx}/bin/dmx";
-          };
-          dmx = {
-            type = "app";
-            program = "${dmx}/bin/dmx";
-          };
         };
       });
 }
