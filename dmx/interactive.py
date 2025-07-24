@@ -10,6 +10,7 @@ import logging
 from dmx.config import Config
 from dmx.music_client import MusicClient
 from dmx.error_handler import ErrorHandler, ErrorContext, ErrorSeverity, InputValidator, handle_errors
+from dmx.preview_player import get_preview_player, cleanup_preview_player
 
 # Initialize colorama for cross-platform color support
 init()
@@ -47,7 +48,9 @@ class InteractiveSession:
         self.current_mode = "tracks"  # tracks, albums, artists
         self.current_artist_albums: List[Dict[str, Any]] = []  # For artist profile view
         self.current_artist_info: Dict[str, Any] = {}  # Current artist info
+        self.current_top_tracks: List[Dict[str, Any]] = []  # Top tracks for preview
         self.search_history: List[str] = []
+        self.preview_player = get_preview_player()  # Audio preview player
         try:
             self.validator = InputValidator()
         except Exception:
@@ -116,6 +119,9 @@ class InteractiveSession:
         print("  [1-5]        - Download range of items")
         print("  [1,3-5,8]    - Download mixed selection")
         print("  all / *      - Download all current results")
+        print("  p [number]   - Play preview of track")
+        print("  play         - Play/pause current preview")
+        print("  stop         - Stop current preview")
         print("  s <query>    - Search for tracks")
         print("  sa <query>   - Search for albums") 
         print("  st <query>   - Search for artists")
@@ -125,6 +131,12 @@ class InteractiveSession:
         print("  status       - Show system status")
         print("  h            - Show this help")
         print("  q            - Quit")
+        
+        # Show preview availability
+        if self.preview_player.is_available():
+            print(f"{Fore.GREEN}🎵 Audio previews available{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.YELLOW}⚠️  Audio previews unavailable (pygame not available){Style.RESET_ALL}")
         print()
     
     async def _main_loop(self):
@@ -156,6 +168,12 @@ class InteractiveSession:
             except Exception as e:
                 context = ErrorContext("main_loop", user_input)
                 self.error_handler.handle_error(e, context)
+        
+        # Cleanup preview player when exiting
+        try:
+            cleanup_preview_player()
+        except Exception:
+            pass  # Ignore cleanup errors
     
     async def _handle_command(self, user_input: str) -> bool:
         """Handle user command. Returns False to exit."""
@@ -177,6 +195,10 @@ class InteractiveSession:
                     # Download item(s)
                     return await self._download_by_numbers(selection_indices)
             
+            # Check for top track preview command (t1, t2, etc.)
+            if user_input.lower().startswith('t') and len(user_input) > 1 and user_input[1:].isdigit():
+                return await self._play_top_track_preview(user_input[1:])
+            
             # Parse command and arguments
             parts = user_input.split(maxsplit=1)
             cmd = parts[0].lower()
@@ -192,6 +214,18 @@ class InteractiveSession:
             elif cmd == 'status':
                 self._show_status()
             
+            elif cmd == 'p' or cmd == 'preview':
+                if not args:
+                    print(f"{Fore.RED}Usage: p <number>{Style.RESET_ALL}")
+                else:
+                    return await self._play_preview(args)
+            
+            elif cmd == 'play':
+                return self._toggle_preview_playback()
+            
+            elif cmd == 'stop':
+                return self._stop_preview()
+            
             elif cmd == 's' or cmd == 'search':
                 if not args:
                     print(f"{Fore.RED}Usage: s <query>{Style.RESET_ALL}")
@@ -199,6 +233,7 @@ class InteractiveSession:
                     self.current_mode = "tracks"
                     self.current_artist_albums = []  # Clear artist profile
                     self.current_artist_info = {}
+                    self.current_top_tracks = []  # Clear top tracks
                     await self._search(args)
             
             elif cmd == 'sa':
@@ -208,6 +243,7 @@ class InteractiveSession:
                     self.current_mode = "albums"
                     self.current_artist_albums = []  # Clear artist profile
                     self.current_artist_info = {}
+                    self.current_top_tracks = []  # Clear top tracks
                     await self._search(args)
             
             elif cmd == 'st':
@@ -217,6 +253,7 @@ class InteractiveSession:
                     self.current_mode = "artists"
                     self.current_artist_albums = []  # Clear artist profile
                     self.current_artist_info = {}
+                    self.current_top_tracks = []  # Clear top tracks
                     await self._search(args)
             
             elif cmd == 'm' or cmd == 'mode':
@@ -224,6 +261,7 @@ class InteractiveSession:
                     self.current_mode = args
                     self.current_artist_albums = []  # Clear artist profile
                     self.current_artist_info = {}
+                    self.current_top_tracks = []  # Clear top tracks
                     print(f"{Fore.GREEN}Switched to {args} mode{Style.RESET_ALL}")
                 elif not args:
                     print(f"{Fore.BLUE}Current mode: {self.current_mode}{Style.RESET_ALL}")
@@ -242,6 +280,7 @@ class InteractiveSession:
                     # Exit artist profile view
                     self.current_artist_albums = []
                     self.current_artist_info = {}
+                    self.current_top_tracks = []  # Clear top tracks
                     print(f"{Fore.GREEN}Back to artist search results{Style.RESET_ALL}")
                     self._display_results()
                 else:
@@ -251,6 +290,7 @@ class InteractiveSession:
                 # Treat as search query for current mode
                 self.current_artist_albums = []  # Clear artist profile
                 self.current_artist_info = {}
+                self.current_top_tracks = []  # Clear top tracks
                 await self._search(user_input)
             
             return True
@@ -484,11 +524,18 @@ class InteractiveSession:
         print(f"{Fore.GREEN}{artist_info.get('name', 'Unknown')}{Style.RESET_ALL}")
         print(f"     {Fore.YELLOW}{artist_info.get('albums', 0)} albums{Style.RESET_ALL} • {Fore.CYAN}{artist_info.get('fans', 0):,} fans{Style.RESET_ALL}")
         
-        # Top tracks (display only, not downloadable from here)
+        # Top tracks (with preview support)
         if top_tracks:
-            print(f"\n{Fore.BLUE}🎵 Top Songs:{Style.RESET_ALL}")
-            for i, track in enumerate(top_tracks[:5], 1):  # Show top 5
-                print(f"     {Fore.GREEN}{track['title']}{Style.RESET_ALL}")
+            print(f"\n{Fore.BLUE}🎵 Top Songs{Style.RESET_ALL}", end="")
+            if self.preview_player.is_available():
+                print(f" {Fore.CYAN}(Enter 't<number>' to preview):{Style.RESET_ALL}")
+            else:
+                print(":")
+            
+            self.current_top_tracks = top_tracks[:5]  # Store for preview functionality
+            for i, track in enumerate(self.current_top_tracks, 1):
+                preview_indicator = " 🎵" if track.get('preview_url') and self.preview_player.is_available() else ""
+                print(f"  t{i}) {Fore.GREEN}{track['title']}{Style.RESET_ALL}{preview_indicator}")
                 print(f"     {Fore.BLUE}{track['album']}{Style.RESET_ALL} • {Fore.YELLOW}{track['duration']}{Style.RESET_ALL}")
         
         # All albums (downloadable)
@@ -496,7 +543,7 @@ class InteractiveSession:
             print(f"\n{Fore.BLUE}💿 Albums (Enter number to download):{Style.RESET_ALL}")
             self._display_artist_albums()
         
-        print(f"\n{Fore.CYAN}Commands: [number] = download album | [1,3,5] = download multiple | all/* = download all | 'back' = return to artist search | 'l' = list albums{Style.RESET_ALL}")
+        print(f"\n{Fore.CYAN}Commands: [number] = download album | [1,3,5] = download multiple | all/* = download all | t<number> = preview top track | 'back' = return to artist search | 'l' = list albums{Style.RESET_ALL}")
         print()
     
     def _display_artist_albums(self):
@@ -788,6 +835,158 @@ class InteractiveSession:
             
         except Exception as e:
             context = ErrorContext("multi_download", additional_info={'numbers': numbers, 'is_artist_albums': is_artist_albums})
+            self.error_handler.handle_error(e, context)
+            return True
+    
+    async def _play_preview(self, number_str: str) -> bool:
+        """Play preview of a track by number."""
+        try:
+            if not self.preview_player.is_available():
+                print(f"{Fore.RED}Preview functionality not available. Please install pygame.{Style.RESET_ALL}")
+                return True
+            
+            try:
+                number = int(number_str)
+            except ValueError:
+                print(f"{Fore.RED}Invalid number: {number_str}{Style.RESET_ALL}")
+                return True
+            
+            # Determine which list to use
+            if self.current_artist_albums:
+                # In artist profile - can't preview albums, only tracks
+                print(f"{Fore.RED}Cannot preview albums. Use track search to preview individual songs.{Style.RESET_ALL}")
+                return True
+            
+            if not self.current_results:
+                print(f"{Fore.RED}No search results available.{Style.RESET_ALL}")
+                return True
+            
+            # Validate number
+            if number < 1 or number > len(self.current_results):
+                print(f"{Fore.RED}Invalid number. Choose 1-{len(self.current_results)}{Style.RESET_ALL}")
+                return True
+            
+            item = self.current_results[number - 1]
+            
+            # Only tracks have previews
+            if item.get('type') != 'track':
+                print(f"{Fore.RED}Only tracks can be previewed. Switch to track mode first.{Style.RESET_ALL}")
+                return True
+            
+            # Check if preview URL is available
+            if not item.get('preview_url'):
+                print(f"{Fore.YELLOW}No preview available for: {item.get('title', 'Unknown')}{Style.RESET_ALL}")
+                return True
+            
+            # Play the preview
+            title = item.get('title', 'Unknown')
+            artist = item.get('artist', 'Unknown')
+            print(f"{Fore.BLUE}🎵 Playing preview: {title} by {artist}{Style.RESET_ALL}")
+            
+            success = await self.preview_player.play_preview(item)
+            if success:
+                print(f"{Fore.GREEN}Preview started. Use 'play' to pause/resume, 'stop' to stop.{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}Failed to play preview.{Style.RESET_ALL}")
+            
+            return True
+            
+        except Exception as e:
+            context = ErrorContext("preview_play", number_str)
+            self.error_handler.handle_error(e, context)
+            return True
+    
+    def _toggle_preview_playback(self) -> bool:
+        """Toggle preview playback (play/pause)."""
+        try:
+            if not self.preview_player.is_available():
+                print(f"{Fore.RED}Preview functionality not available.{Style.RESET_ALL}")
+                return True
+            
+            if not self.preview_player.is_playing and not self.preview_player.is_paused:
+                print(f"{Fore.YELLOW}No preview currently loaded. Use 'p <number>' to start a preview.{Style.RESET_ALL}")
+                return True
+            
+            success = self.preview_player.pause()
+            if success:
+                if self.preview_player.is_paused:
+                    print(f"{Fore.YELLOW}⏸️  Preview paused{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.GREEN}▶️  Preview resumed{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}Failed to toggle playback.{Style.RESET_ALL}")
+            
+            return True
+            
+        except Exception as e:
+            context = ErrorContext("preview_toggle")
+            self.error_handler.handle_error(e, context)
+            return True
+    
+    def _stop_preview(self) -> bool:
+        """Stop current preview playback."""
+        try:
+            if not self.preview_player.is_available():
+                print(f"{Fore.RED}Preview functionality not available.{Style.RESET_ALL}")
+                return True
+            
+            success = self.preview_player.stop()
+            if success:
+                print(f"{Fore.YELLOW}⏹️  Preview stopped{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}No preview was playing.{Style.RESET_ALL}")
+            
+            return True
+            
+        except Exception as e:
+            context = ErrorContext("preview_stop")
+            self.error_handler.handle_error(e, context)
+            return True
+    
+    async def _play_top_track_preview(self, number_str: str) -> bool:
+        """Play preview of a top track by number (t1, t2, etc.)."""
+        try:
+            if not self.preview_player.is_available():
+                print(f"{Fore.RED}Preview functionality not available. Please install pygame.{Style.RESET_ALL}")
+                return True
+            
+            try:
+                number = int(number_str)
+            except ValueError:
+                print(f"{Fore.RED}Invalid number: {number_str}{Style.RESET_ALL}")
+                return True
+            
+            if not self.current_top_tracks:
+                print(f"{Fore.RED}No top tracks available. Enter an artist profile first.{Style.RESET_ALL}")
+                return True
+            
+            # Validate number
+            if number < 1 or number > len(self.current_top_tracks):
+                print(f"{Fore.RED}Invalid number. Choose t1-t{len(self.current_top_tracks)}{Style.RESET_ALL}")
+                return True
+            
+            track = self.current_top_tracks[number - 1]
+            
+            # Check if preview URL is available
+            if not track.get('preview_url'):
+                print(f"{Fore.YELLOW}No preview available for: {track.get('title', 'Unknown')}{Style.RESET_ALL}")
+                return True
+            
+            # Play the preview
+            title = track.get('title', 'Unknown')
+            artist = track.get('artist', 'Unknown')
+            print(f"{Fore.BLUE}🎵 Playing preview: {title} by {artist}{Style.RESET_ALL}")
+            
+            success = await self.preview_player.play_preview(track)
+            if success:
+                print(f"{Fore.GREEN}Preview started. Use 'play' to pause/resume, 'stop' to stop.{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}Failed to play preview.{Style.RESET_ALL}")
+            
+            return True
+            
+        except Exception as e:
+            context = ErrorContext("top_track_preview", number_str)
             self.error_handler.handle_error(e, context)
             return True
     
