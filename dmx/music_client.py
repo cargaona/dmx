@@ -37,7 +37,7 @@ class MusicClient:
             from dmx.deemix_client import DeemixClient
             self.deemix_client = DeemixClient(self.arl, self.quality, self.output_dir)
             self.client_status['deemix_client'] = self.deemix_client.is_available()
-            logger.info(f"Deemix client initialized: {self.client_status['deemix_client']}")
+            logger.debug(f"Deemix client initialized: {self.client_status['deemix_client']}")
         except ImportError as e:
             logger.warning(f"Deemix not available: {e}")
             self.deemix_client = None
@@ -45,7 +45,7 @@ class MusicClient:
             logger.error(f"Failed to initialize deemix client: {e}")
             self.deemix_client = None
         
-        logger.info(f"Client status: {self.client_status}")
+        logger.debug(f"Client status: {self.client_status}")
     
     async def _ensure_api_client(self):
         """Ensure API client is initialized."""
@@ -54,7 +54,7 @@ class MusicClient:
                 self.api_client = APIClient(self.config_dir)
                 await self.api_client.__aenter__()
                 self.client_status['api_client'] = True
-                logger.info("API client initialized successfully")
+                logger.debug("API client initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize API client: {e}")
                 self.api_client = None

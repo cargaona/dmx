@@ -169,7 +169,8 @@ class DeemixClient:
                 'album': track.get('album', {}).get('title', 'Unknown'),
                 'duration': self._format_duration(track.get('duration', 0)),
                 'type': 'track',
-                'url': f"https://www.deezer.com/track/{track.get('id')}"
+                'url': f"https://www.deezer.com/track/{track.get('id')}",
+                'preview_url': track.get('preview')  # 30-second MP3 preview URL
             })
         return formatted
     

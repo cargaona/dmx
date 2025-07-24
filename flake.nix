@@ -34,7 +34,7 @@
             makeWrapper ${python}/bin/python $out/bin/dmx \
               --add-flags "-m dmx" \
               --set PYTHONPATH "$out/lib/python:${python.pkgs.makePythonPath (with python.pkgs; [
-                click requests colorama aiohttp deemix
+                click requests colorama aiohttp deemix pygame
               ])}"
           '';
 
@@ -63,6 +63,7 @@
             python.pkgs.colorama
             python.pkgs.requests
             python.pkgs.aiohttp
+            python.pkgs.pygame
           ];
 
           shellHook = ''
