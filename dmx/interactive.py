@@ -112,6 +112,10 @@ class InteractiveSession:
         
         print(f"\n{Fore.BLUE}Commands:{Style.RESET_ALL}")
         print("  [number]     - Download item (tracks/albums) or view profile (artists)")
+        print("  [1,3,5]      - Download multiple items (comma-separated)")
+        print("  [1-5]        - Download range of items")
+        print("  [1,3-5,8]    - Download mixed selection")
+        print("  all / *      - Download all current results")
         print("  s <query>    - Search for tracks")
         print("  sa <query>   - Search for albums") 
         print("  st <query>   - Search for artists")
@@ -156,17 +160,22 @@ class InteractiveSession:
     async def _handle_command(self, user_input: str) -> bool:
         """Handle user command. Returns False to exit."""
         try:
-            # Check if it's a number 
-            if user_input.isdigit():
+            # Check if it's a selection (number, range, or 'all')
+            selection_indices = self._parse_selection_input(user_input)
+            if selection_indices is not None:
                 if self.current_mode == "artists" and not self.current_artist_albums:
-                    # View artist profile (not in artist profile view yet)
-                    return await self._view_artist_profile(int(user_input))
+                    # For artists mode, only allow single selection to view profile
+                    if len(selection_indices) == 1:
+                        return await self._view_artist_profile(selection_indices[0])
+                    else:
+                        print(f"{Fore.RED}Artist mode only supports single selection to view profiles.{Style.RESET_ALL}")
+                        return True
                 elif self.current_artist_albums:
-                    # Download album from artist profile view
-                    return self._download_album_from_artist(int(user_input))
+                    # Download album(s) from artist profile view
+                    return await self._download_albums_from_artist(selection_indices)
                 else:
-                    # Download item
-                    return self._download_by_number(int(user_input))
+                    # Download item(s)
+                    return await self._download_by_numbers(selection_indices)
             
             # Parse command and arguments
             parts = user_input.split(maxsplit=1)
@@ -487,7 +496,7 @@ class InteractiveSession:
             print(f"\n{Fore.BLUE}💿 Albums (Enter number to download):{Style.RESET_ALL}")
             self._display_artist_albums()
         
-        print(f"\n{Fore.CYAN}Commands: [number] = download album | 'back' = return to artist search | 'l' = list albums{Style.RESET_ALL}")
+        print(f"\n{Fore.CYAN}Commands: [number] = download album | [1,3,5] = download multiple | all/* = download all | 'back' = return to artist search | 'l' = list albums{Style.RESET_ALL}")
         print()
     
     def _display_artist_albums(self):
@@ -553,6 +562,234 @@ class InteractiveSession:
             self.error_handler.handle_error(e, context)
         
         return True
+    
+    def _parse_selection_input(self, user_input: str) -> Optional[List[int]]:
+        """Parse selection input supporting various formats.
+        
+        Supports:
+        - Single number: "3" -> [3]
+        - Comma-separated: "1,3,5" -> [1,3,5]  
+        - Ranges: "1-5" -> [1,2,3,4,5]
+        - Mixed: "1,3-5,8" -> [1,3,4,5,8]
+        - All: "all" or "*" -> [1,2,3,...,N]
+        
+        Returns None if input is not a selection format.
+        """
+        user_input = user_input.strip().lower()
+        
+        # Handle 'all' or '*' keywords
+        if user_input in ['all', '*']:
+            if self.current_artist_albums:
+                return list(range(1, len(self.current_artist_albums) + 1))
+            elif self.current_results:
+                return list(range(1, len(self.current_results) + 1))
+            else:
+                return []
+        
+        # Check if it looks like a selection (contains only digits, commas, dashes)
+        if not re.match(r'^[\d,\-\s]+$', user_input):
+            return None
+        
+        try:
+            indices = set()
+            parts = user_input.split(',')
+            
+            for part in parts:
+                part = part.strip()
+                if '-' in part:
+                    # Handle range like "1-5"
+                    range_parts = part.split('-', 1)
+                    if len(range_parts) == 2:
+                        start = int(range_parts[0].strip())
+                        end = int(range_parts[1].strip())
+                        if start <= end:
+                            indices.update(range(start, end + 1))
+                        else:
+                            # Invalid range
+                            return None
+                    else:
+                        # Invalid format
+                        return None
+                else:
+                    # Single number
+                    indices.add(int(part))
+            
+            return sorted(list(indices))
+            
+        except ValueError:
+            # Not a valid selection format
+            return None
+    
+    async def _download_by_numbers(self, numbers: List[int]) -> bool:
+        """Download multiple items by their numbers in results."""
+        try:
+            if not self.current_results:
+                print(f"{Fore.RED}No search results available.{Style.RESET_ALL}")
+                return True
+            
+            # Validate all numbers first
+            invalid_numbers = [n for n in numbers if n < 1 or n > len(self.current_results)]
+            if invalid_numbers:
+                print(f"{Fore.RED}Invalid numbers: {', '.join(map(str, invalid_numbers))}. Choose 1-{len(self.current_results)}{Style.RESET_ALL}")
+                return True
+            
+            # Remove duplicates and sort
+            numbers = sorted(list(set(numbers)))
+            
+            if len(numbers) == 1:
+                # Single download - use existing method for compatibility
+                return self._download_by_number(numbers[0])
+            
+            # Multiple downloads
+            print(f"{Fore.CYAN}Starting batch download of {len(numbers)} items...{Style.RESET_ALL}")
+            
+            # Show confirmation for large batches
+            if len(numbers) > 5:
+                items_preview = [self.current_results[n-1].get('title', self.current_results[n-1].get('name', f'Item {n}')) for n in numbers[:3]]
+                preview_text = ', '.join(items_preview)
+                if len(numbers) > 3:
+                    preview_text += f" and {len(numbers) - 3} more"
+                
+                print(f"{Fore.YELLOW}About to download: {preview_text}{Style.RESET_ALL}")
+                confirm = input(f"{Fore.BLUE}Continue? (y/N): {Style.RESET_ALL}").strip().lower()
+                if confirm not in ['y', 'yes']:
+                    print(f"{Fore.YELLOW}Download cancelled.{Style.RESET_ALL}")
+                    return True
+            
+            return await self._download_multiple_items(numbers, self.current_results)
+            
+        except KeyboardInterrupt:
+            print(f"\n{Fore.YELLOW}Batch download cancelled by user.{Style.RESET_ALL}")
+            return True
+        except Exception as e:
+            context = ErrorContext("batch_download", additional_info={'numbers': numbers})
+            self.error_handler.handle_error(e, context)
+            return True
+    
+    async def _download_albums_from_artist(self, numbers: List[int]) -> bool:
+        """Download multiple albums from artist profile view."""
+        try:
+            if not self.current_artist_albums:
+                print(f"{Fore.RED}No albums available for download.{Style.RESET_ALL}")
+                return True
+            
+            # Validate all numbers first
+            invalid_numbers = [n for n in numbers if n < 1 or n > len(self.current_artist_albums)]
+            if invalid_numbers:
+                print(f"{Fore.RED}Invalid numbers: {', '.join(map(str, invalid_numbers))}. Choose 1-{len(self.current_artist_albums)}{Style.RESET_ALL}")
+                return True
+            
+            # Remove duplicates and sort
+            numbers = sorted(list(set(numbers)))
+            
+            if len(numbers) == 1:
+                # Single download - use existing method
+                return self._download_album_from_artist(numbers[0])
+            
+            # Multiple downloads
+            print(f"{Fore.CYAN}Starting batch download of {len(numbers)} albums...{Style.RESET_ALL}")
+            
+            # Show confirmation for large batches  
+            if len(numbers) > 3:
+                albums_preview = [self.current_artist_albums[n-1].get('title', f'Album {n}') for n in numbers[:3]]
+                preview_text = ', '.join(albums_preview)
+                if len(numbers) > 3:
+                    preview_text += f" and {len(numbers) - 3} more"
+                
+                print(f"{Fore.YELLOW}About to download albums: {preview_text}{Style.RESET_ALL}")
+                confirm = input(f"{Fore.BLUE}Continue? (y/N): {Style.RESET_ALL}").strip().lower()
+                if confirm not in ['y', 'yes']:
+                    print(f"{Fore.YELLOW}Download cancelled.{Style.RESET_ALL}")
+                    return True
+            
+            return await self._download_multiple_items(numbers, self.current_artist_albums, is_artist_albums=True)
+            
+        except KeyboardInterrupt:
+            print(f"\n{Fore.YELLOW}Batch download cancelled by user.{Style.RESET_ALL}")
+            return True
+        except Exception as e:
+            context = ErrorContext("batch_album_download", additional_info={'numbers': numbers})
+            self.error_handler.handle_error(e, context)
+            return True
+    
+    async def _download_multiple_items(self, numbers: List[int], items: List[Dict[str, Any]], is_artist_albums: bool = False) -> bool:
+        """Download multiple items with progress tracking."""
+        successful_downloads = []
+        failed_downloads = []
+        
+        try:
+            for i, number in enumerate(numbers, 1):
+                try:
+                    item = items[number - 1]
+                    item_name = item.get('title', item.get('name', f'Item {number}'))
+                    
+                    # Progress indicator
+                    print(f"{Fore.BLUE}[{i}/{len(numbers)}] Downloading: {item_name}{Style.RESET_ALL}")
+                    
+                    # Get URL and validate
+                    url = item.get('url', '')
+                    if self.validator:
+                        try:
+                            validated_url = self.validator.validate_url(url)
+                        except Exception:
+                            validated_url = url
+                    else:
+                        validated_url = url
+                    
+                    # Safety check
+                    try:
+                        from dmx.error_handler import SafetyChecker
+                        from pathlib import Path
+                        if not SafetyChecker.check_disk_space(Path(self.config.output_dir)):
+                            print(f"{Fore.YELLOW}Warning: Low disk space{Style.RESET_ALL}")
+                    except Exception:
+                        pass
+                    
+                    # Download
+                    success = self.client.download(validated_url)
+                    
+                    if success:
+                        successful_downloads.append((number, item_name))
+                        print(f"{Fore.GREEN}  ✓ Completed{Style.RESET_ALL}")
+                    else:
+                        failed_downloads.append((number, item_name))
+                        print(f"{Fore.RED}  ✗ Failed{Style.RESET_ALL}")
+                    
+                    # Small delay between downloads to avoid overwhelming the service
+                    if i < len(numbers):  # Don't delay after the last item
+                        await asyncio.sleep(0.5)
+                        
+                except KeyboardInterrupt:
+                    print(f"\n{Fore.YELLOW}Batch download cancelled by user.{Style.RESET_ALL}")
+                    break
+                except Exception as e:
+                    item_name = f"Item {number}"
+                    try:
+                        item_name = items[number - 1].get('title', items[number - 1].get('name', item_name))
+                    except:
+                        pass
+                    failed_downloads.append((number, item_name))
+                    print(f"{Fore.RED}  ✗ Error downloading {item_name}: {str(e)}{Style.RESET_ALL}")
+                    continue
+            
+            # Summary
+            print(f"\n{Fore.CYAN}Batch Download Summary:{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}✓ Successful: {len(successful_downloads)}{Style.RESET_ALL}")
+            if successful_downloads:
+                for number, name in successful_downloads:
+                    print(f"  {number}. {name}")
+            
+            if failed_downloads:
+                print(f"{Fore.RED}✗ Failed: {len(failed_downloads)}{Style.RESET_ALL}")
+                for number, name in failed_downloads:
+                    print(f"  {number}. {name}")
+            
+            return True
+            
+        except Exception as e:
+            context = ErrorContext("multi_download", additional_info={'numbers': numbers, 'is_artist_albums': is_artist_albums})
+            self.error_handler.handle_error(e, context)
+            return True
     
     def _get_mode_color(self):
         """Get color for current mode."""
