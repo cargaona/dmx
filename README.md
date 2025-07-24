@@ -12,6 +12,8 @@ Interactive music search and download tool with Deezer integration. Browse artis
 
 ### 🎯 **Interactive Experience**
 - **Multi-Mode Search**: Switch between tracks, albums, and artists instantly
+- **Audio Previews**: 30-second track previews with playback controls
+- **Multiple Downloads**: Select multiple items with ranges like `[1,3-5,8]`
 - **Intuitive Navigation**: Browse artist profiles with `back` command support
 - **Visual Feedback**: Color-coded interface with progress indicators
 - **Smart Detection**: Avoids re-downloading existing files
@@ -112,7 +114,7 @@ Pez
   2  Ion (13 tracks)
   [... 70 more albums ...]
 
-Commands: [number] = download album | 'back' = return to artist search
+Commands: [number] = download album | [1,3,5] = download multiple | t<number> = preview top track | 'back' = return to artist search
 ```
 
 ## Usage
@@ -128,6 +130,12 @@ Commands available in interactive mode:
 - `sa <query>` - Search albums  
 - `st <query>` - Search artists
 - `<number>` - Download by number
+- `[1,3-5,8]` - Download multiple items/ranges
+- `all` or `*` - Download all current results
+- `p <number>` - Play 30-second preview of track
+- `t<number>` - Play preview of artist's top track
+- `play` - Play/pause current preview
+- `stop` - Stop current preview
 - `m tracks|albums|artists` - Switch mode
 - `l` - List current results
 - `status` - Show system status
@@ -192,7 +200,7 @@ dmx
 ✓ Downloaded: Bruno Mars - Finesse (Remix; feat. Cardi B).mp3
 ```
 
-### Album Downloads
+### Album Downloads & Multiple Selection
 ```bash
 # Switch to album mode
 [tracks] > m albums
@@ -205,6 +213,26 @@ dmx
 # Download entire album
 [albums] > 1
 ✓ Downloaded 14 files
+
+# Download multiple items (also works with tracks/artists)
+[tracks] > [1,3-5,8]  # Downloads items 1, 3, 4, 5, and 8
+[tracks] > all        # Downloads all current results
+```
+
+### Audio Previews
+```bash
+# Play 30-second preview of a track
+[tracks] > p 1
+🎵 Playing preview: Song Title by Artist
+Preview started. Use 'play' to pause/resume, 'stop' to stop.
+
+# Control playback
+[tracks] > play       # Pause/resume
+[tracks] > stop       # Stop preview
+
+# Preview artist's top tracks (in artist profile)
+[Artist Albums] > t1  # Preview first top track
+[Artist Albums] > t2  # Preview second top track
 ```
 
 ### Direct URL Downloads
@@ -233,6 +261,7 @@ Downloaded files are organized as:
 - Python 3.8+
 - Valid Deezer ARL token
 - Internet connection
+- Optional: pygame (for audio previews) - `pip install pygame`
 
 ## Development
 
